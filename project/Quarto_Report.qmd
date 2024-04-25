@@ -1,0 +1,180 @@
+---
+title: "Economic Effects on Rates of Malnourishment"
+subtitle: "A UNICEF Report on Children Under 5 Globally."
+author: "Laura Creighton"
+date: "2024-04-25"
+format: 
+  html: 
+    theme: lumen
+    backgroundcolor: beige
+    toc: true
+execute: 
+  echo: false
+  warning: false
+  message: false
+  
+---
+```{r}
+#| label: setup
+#| include: false
+
+# libraries
+library(ggplot2)
+library(tidyverse)
+library(plotly)
+library(dplyr)
+library(stringr)
+
+# data
+unicef_indicator_2 <- read_csv("unicef_indicator_2.csv")
+unicef_metadata <- read_csv("unicef_metadata.csv")
+
+# transformations
+readr::spec(unicef_metadata)
+readr::spec(unicef_indicator_2)
+
+merged_data <- merge(unicef_metadata, unicef_indicator_2, by = "country", all = TRUE)
+
+cleaned_data <- na.omit(merged_data)
+
+```
+## Introduction
+
+Across the globe, varying levels of malnutrition have been identified, with an array of factors influencing levels despite efforts by government and charities to negate this phenomenon. With data taken from Unicef, we will process and analyse the relationship between economics and malnutrition. This data set explores malnutrition in children under 5 years, and has reported as a percentage of those that are suffering from malnourishment. 
+
+
+Unicef has identified three indicators that deem an individual subject to malnutrition:
+
+- **Wasted**: Life threateningly low weight to height ratio.
+- **Overweight**: Higher than healthy weight with respect to height.
+- **Stunted**: Too short for stage of development, often due to chronic malnutrition.
+
+## Visualisations
+```{r}
+#| fig-cap: In the map above, **global distribution of malnutrition** is visible. Countries indicated in **green** have **low** percentages of malnourished children <5 years, whereas those in **red** exhibit **high** percentages. We can immediately identify from the visual that primary areas of concern include central and southern Africa, as well as central and south-east Asia. 
+
+world_map <- map_data("world")
+
+map_data_join <- full_join(unicef_indicator_2, world_map, by = c("country" = "region"))
+
+ggplot(map_data_join) +
+  aes(x = long, y = lat, group = group, fill = obs_value) +
+  geom_polygon() +
+  scale_fill_gradient(low = "green", high = "red", na.value = "grey") +
+  labs(
+    title = "Global Distribution of Malnourishment",
+    subtitle = "% of Children >5yrs Malnourished") +
+  theme_bw()
+
+```
+```{r}
+
+df1 <- data.frame(
+  country = c(
+    "Belgium", "Netherlands", "Poland", "Estonia", "South Korea",
+    "Portugal", "Czech Republic", "Tuvalu", "Saint Lucia", "Tonga"
+  ),
+  observed_value = c(5.5, 5.6, 6.5, 7.7, 7.9, 10.8, 11.3, 11.4, 11.6, 13.8) 
+)
+
+df2 <- data.frame(
+  country = c(
+    "Papua New Guinea", "Yemen", "Timor-Leste", "India", "Burundi",
+    "Guatemala", "Madagascar", "Eritrea", "Equatorial Guinea", "Angola"
+  ),
+  observed_value = c(66.2, 63.8, 62.6, 59.1, 59.0, 57.6, 57.4, 56.0, 55.2, 53.5)
+)
+
+```
+
+```{r}
+#| fig-cap: Above, we see a bar graph depicting the GDP per capita of the 10 countries with the **highest** and the **lowest** rate of malnutrition in children >5yrs. We immediately see a **clear correllation between countries with a high GDP, and low incidence of malnourishment**. As we move down the list to the figures in red, significantly lower GDP is found than in the green. This supports the hypothesis that an **inverse relationship exists** between these two variables.
+
+merged_data <- merged_data %>%
+  rename(gdp_per_cap = `GDP per capita (constant 2015 US$)`)
+
+average_gdp_per_cap <- merged_data %>%
+  group_by(country) %>%
+  summarize(average_gdp_per_cap = mean(gdp_per_cap, na.rm = TRUE))
+
+f_combined <- df1 %>%
+  group_by_all() %>%
+  summarize_all(~ paste(unique(.), collapse = ", "))
+
+b_combined <- df2 %>%
+  group_by_all() %>%
+  summarize_all(~ paste(unique(.), collapse = ", "))
+
+merged_df1 <- inner_join(df1, average_gdp_per_cap, by = "country")
+merged_df2 <- inner_join(df2, average_gdp_per_cap, by = "country")
+
+combined_df <- rbind(merged_df1, merged_df2)
+
+combined_df$country <- factor(combined_df$country, levels = rev(unique(combined_df$country)))
+
+combined_df <- combined_df %>%
+  mutate(color = ifelse(country %in% c("Angola", "Burundi", "Equatorial Guinea", "Eritrea", "Guatemala", "India", "Madagascar", "Papua New Guinea", "Timor-Leste", "Yemen"), "red", "green"))
+
+# Create the bar chart with different colors for specific countries
+ggplot(combined_df, aes(x = average_gdp_per_cap, y = country, fill = color)) +
+  geom_bar(stat = "identity") +
+  scale_fill_identity() +
+  labs(title = "Average GDP per Capita by Country",
+       x = "Average GDP per Capita",
+       y = "Country") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r}
+#| fig-cap: Similar to the bar chart seen earlier, this scatter plot investigates the relationship between malnourishment and GDP. The linear regression line **supports the conclusions drawn** from the previous visualisation, in that **countries with a higher incidence of malnutrtion, also have a lower GDP**.
+
+country_averages <- unicef_indicator_2 %>%
+  group_by(country) %>%
+  summarize(average_obs_value = mean(obs_value, na.rm = TRUE))
+
+average_obs_per_country <- merged_data %>%
+  group_by(country) %>%
+  summarize(average_obs_value = mean(obs_value, na.rm = TRUE))
+
+scatter_data <- inner_join(country_averages, average_gdp_per_cap, by = "country")
+
+average_obs_per_country <- merged_data %>%
+  filter(!is.na(obs_value)) %>%  # Filter out rows with NA obs_value
+  group_by(country) %>%
+  summarize(average_obs_value = mean(obs_value))
+
+filtered_average_obs_per_country <- average_obs_per_country[complete.cases(average_obs_per_country), ]
+
+gdp_vs_obs_data <- left_join(filtered_average_obs_per_country, average_gdp_per_cap, by = "country")
+
+ggplot(gdp_vs_obs_data) +
+  aes(average_obs_value, average_gdp_per_cap) +
+  geom_point() +
+  guides(color = "none") +
+  geom_smooth(method = "lm") + 
+  labs(x = "Observed Value", y = "GDP Per Capita", title = "Scatter Plot with Linear Regression") +
+  theme_minimal()
+```
+
+```{r}
+#| fig-cap: In the interactive Time Series Chart depicted above, we note that the countries identified as having **lower malnourishment rates** in the visualisations prior to this, also have heightened **life expectancy** when compared with the alternate. For example, in 2020, Belgium exhibited a life expectancy of 80, whereas Angola reported almost 20 years less, at 62. 
+
+merged_data$life_exp <- merged_data$`Life expectancy at birth, total (years)`
+
+timeseries_plot_1 <- merged_data %>%
+  ggplot() +
+  aes(year, life_exp, color = country) + 
+  geom_line()
+
+ggplotly(timeseries_plot_1)
+```
+
+## Conclusion
+**Highly developed countries** have **lower levels of malnourishment** in children <5 yrs, whereas countries with **lower GDP** per capita tend to have **higher incidences**. Therefore we can conclude that **an inverse relationship exisits between economic activity and development**, and malnutrition in children. Additionally, economic events throughout time have created spikes in levels of malnourishment, for example; recession, global economic slowdown, and sudden economic downturns. This again supports the hypotheses that economic activity and malnourishment are interconnected.
+
+
+
+
+
+
